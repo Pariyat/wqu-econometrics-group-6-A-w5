@@ -1,0 +1,193 @@
+---
+title: "WQU Econometrics Week-5 Group Project Submission 2 Group 6-A"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+    toc: true
+
+---
+
+## Group Member:  
+(in alphabetical order)
+- Dylan Thorne (dylan.thorne@gmail.com)  
+- Mohammad Amimul Ihsan Aquil (amimul786@live.com)  
+- Pariyat Limpitheeprakan (macchiato.me@gmail.com)  
+- Trai Torsricharoen (traitorsricharoen@gmail.com)  
+- YIU LEUNG CHENG (howard.yl.cheng.hk@gmail.com)  
+
+# 3.2.1 Voltality Analysis
+*Forecast Apple daily stock return using a GARCH model.*  
+*Source:* [Yahoo Finance](https://finance.yahoo.com/quote/AAPL/history/) (AAPL.csv)
+
+## 3.2.1.1 Select GARCH model (ARCH, GARCH-M, IGARCH, EGARCH, TARCH, multivariate GARCH etc). Explain your choice.
+Firstly, we begin exploratory data analysis.
+```{r 3.2.1.1-h1}
+aapldata<-read.csv("AAPL.csv")
+require(tidyverse)
+require(stats)
+require(tseries)
+require(forecast)
+rows = nrow(aapldata)
+#apply log to index to get log return
+returns <- log(aapldata[2:rows,"Open"]/aapldata[1:(rows-1),"Open"])
+#plot log return corresponding to date 
+plot(aapldata[2:(rows),"Date"],returns)
+```
+```{r 3.2.1.1-h2}
+adf.test(returns)
+```
+ADF test for stationarity of log return (suggesting stationarity).
+```{r 3.2.1.1-h3}
+pacf(returns)
+```
+
+PACF plot suggests significant spike through lag 1.
+```{r 3.2.1.1-h4}
+acf(returns)
+```
+
+ACF plot shows exponential decay. Thus, it can be deduced AR(1) model. Next, we model volatility of residual with AR(1) model.
+
+```{r 3.2.1.1-h5}
+lengthOfReturns<-length(returns)
+ARIMA_Model <- arima(window(returns,1,lengthOfReturns), order=c(1,0,0), method = "ML")
+acf((ARIMA_Model$residuals)^2)
+```
+
+```{r 3.2.1.1-h6}
+pacf((ARIMA_Model$residuals)^2)
+```
+
+ACF and PCF plot show observed significant spike in through lag 1. Now we use `garchFit` function in [`fGarch`](https://cran.r-project.org/web/packages/fGarch/index.html) package to fitting the time series.
+
+####  GARCH(1,1) Model Implementation
+```{r 3.2.1.1-h7}
+require(fGarch)
+model <- garchFit(formula = ~ arma(1,0) + garch(1,1) , data = returns, trace = F)
+summary(model)
+```
+
+Now we evaluate the model by ploting residuals of model in Q-Q plot.
+```{r 3.2.1.1-h8}
+res = residuals(model)
+qqnorm(res)
+```
+Diagnostic tests on the residuals look good. Although residuals are not normally distributed (demostrating fat tails), they are not autocorrelated. Coefficient of the AR process and ARCH effect are significant, so the model seems encompassing.
+
+## 3.2.1.2 Forecast next period daily return (t+1) using the chosen model. Select the timeframe in the analysis. Provide charts and comments.
+
+Now, we predict next period daily return with the chosen model from 3.2.1.1
+```{r}
+require("rugarch")
+garch11_spec <- ugarchspec(variance.model = list(garchOrder = c(1, 1)),mean.model = list(armaOrder = c(1, 0)))
+garch11_fit<-ugarchfit(spec=garch11_spec, data=returns)
+garch11_fit
+
+```
+
+```{r}
+garch11_forecast<-ugarchforecast(garch11_fit, nahead=1)
+garch11_forecast
+
+```
+Now we fit the predicted value.
+```{r}
+plot(garch11_forecast,which = 1)
+
+```
+
+Note that earlier we took a difference and applied the natural logarithm to the data. Therefore, it is forecasted next period daily log return as `T_last * e ^ -0.0005375` which equals `T_last * 0.99946` where `T_last` is the last stock return
+
+```{r}
+
+tail(aapldata$Close,1) * exp(-0.0009486) 
+
+```
+Since `T_last` is 227.01, the predicted value then equals to `227.01 * 0.99946 =  226.79` (to 5 significant digits)
+
+
+# 3.2.2 Multivariate Analysis  
+*Calculating Equilibrium FX*
+*Source:* 
+- [Yahoo Finance](https://finance.yahoo.com/quote/AAPL/history/) (USDJPY.csv)
+- [OECD](https://data.oecd.org/price/inflation-cpi.htm) (CPI.csv and IR.csv)
+
+## 3.2.2.1 Indicate economic theories and models for calculating equilibrium FX.  
+As we study from the Econometric course, the foreign exchange rate is a random walk process. The vital concept of foreign exchange rate equilibrium is that the prediction over the long-term. The expected foreign exchange rate equilibrium is built from "International Parity Conditions". Rosenberg and Barker *(CFA Institute, 2019)* explained that "Parity conditions show how expected inflation differentials, interest rate differentials, forward exchange rates, current spot exchange rates, and expected future spot exchange rates would be linked in an ideal world. These conditions typically make simplifying assumptions, such as zero transaction costs, perfect information that is available to all market participants, risk neutrality, and freely adjustable market prices."
+
+Widely used parity conditions are covered interest rate parity, uncovered interest rate parity, forward rate parity, purchasing power parity and the international Fisher effect. They can be summarized as following table:
+
+
+| Parity conditions              | Macro-Economic          |
+|--------------------------------|-------------------------|
+| Covered interest rate parity   | Risk-free rate          |
+| Uncovered interest rate parity | Expected risk free rate |
+| Forward rate parity            | Quote forward rate      |
+| Purchasing power parity        | Inflation rate          |
+| International Fisher effect    | Real Interest rate      |
+
+
+## 3.2.2.2 Indicate macroeconomic variables used for calculating equilibrium FX.
+
+The currency pair chosen is USD/JPY. There are many concepts of exchange rate "equilibrium" in the literature. MacDonald and Dias *(Dias and MacDonal,2007)* estimated a time-varying “Behavioural Equilibrium Exchange Rate” (BEER). In this question, the time-varying BEER is estimated using only Purchasing Power Parity (PPP) and Uncovered Interest Rate Parity(UIP) as determining forces.  
+__Purchasing Power Parity__  
+Purchasing Power Parity (PPP) states that nominal exchange rates should move to equate the price of goods and services across countries – i.e. JPY100 should buy as much as JPY100 exchanged into US dollars and used to purchase goods in America. Relative PPP *(Dominick, 2004)* allows for a permanent wedge between the price levels of two countries, caused by, for example, productivity differentials and nontraded goods and services.  
+__Uncovered Interest Rate Parity__  
+The theory of Uncovered Interest Rate Parity (UIP) is the capital market analogue to PPP. It states that if interest rates in Japan are higher than similar interest rates in USA, then investors must be expecting the Japan exchange rate to depreciate. If this were not the case, then investors would have more incentive to purchase Japan assets, driving the Japan spot exchange rate up (or the Japan interest rate down).  
+Therefore, we retrieved CPI and interest rate time series data respectively for JPN and USA to perform testing on cointergation and try to form an estimate of the exchange rate equilibrium  by combining PPP and UIP in a single linear combination.
+
+## 3.2.2.3 Explain the connection between linear regression and Vector Error Correction (VEC).
+Vector Error Correction (VEC) Model is a variation of linear regression. Their differences are as belows:
+1.	Linear regression is a linear approach to modeling the relationship between a scalar response and one or more explanatory variables, whereas vector error correction can model the relationship between vector response and one or more explanatory vectors.
+2.	Linear regression is unable to capture cointegration relationships between variable, while vector error correction model can exhibit cointegration relationship with Johansen test and the decomposition of matrix 𝚷 can yield intuitive interpretation of cointegration..
+
+## 3.2.2.4 Calculate equilibrium FX using VEC. You can use the Behavioural Equilibrium Exchange Rate (BEER) approach. Comment results.
+By making use of the eigenvector components of the eigenvector associated wit the largest eigenvalue, we can obtain the linear combination of equilibrium USD/JPY rate. Therefore, the linear combination of series is as below.
+
+```{r 3.2.2.4-1}
+#source of data OECD and yahoo finance
+require(vars)
+cpi_data<-read.csv("CPI.csv")
+ir_data<-read.csv("IR.csv")
+fx_data<-read.csv("USDJPY.csv")
+rows = nrow(cpi_data)
+cpi_JPN<-cpi_data[1:rows,"JPN_CPI"]
+cpi_USA<-cpi_data[1:rows,"USA_CPI"]
+ir_JPN<-ir_data[1:rows, "JPN_STINT"]
+ir_USA<-ir_data[1:rows, "USA_STINT"]
+USDJPY<-fx_data[1:rows, "Price"]
+
+#Cointegration Analysis
+require(urca)
+require(tsDyn)
+
+series= cbind(USDJPY, cpi_JPN, cpi_USA, ir_JPN, ir_USA)
+```
+Perform Johansen Test on the time series.
+```{r 3.2.2.4-2}
+#Johansen test
+jotest1=ca.jo(series, type="eigen", K=10, ecdet="none", spec="longrun")
+summary(jotest1)
+```
+To form linear combination of series,the largest eigenvalue 0.50177294 corresponding to eigenvector `(1, -0.5643054, 0.2154684, -13.2117097, -3.3266760)`
+
+```{r 3.2.2.4-3}
+equ_USDJPY = 1*USDJPY-0.5643054*cpi_JPN+0.2154684*cpi_USA-13.2117097*ir_JPN-3.3266760*ir_USA
+```
+Now we visualize actual `USDJPY` and equilibrium `USDJPY`
+```{r 3.2.2.4-4}
+plot(USDJPY, type="l", col="blue")
+lines(equ_USDJPY,col="green")
+```
+Also, we need to test stationarity, and found that equilibrium USD/JPY is stationary
+```{r 3.2.2.4-5}
+require("tseries")
+adf.test(equ_USDJPY)
+```
+As shown in the chart of the equilibrium USD/JPY rate overlaid actual USD/JPY rate, the equilibrium USD/JPY rate(green line) is less volatile than USD/JPY spot rate (blue line). This is normal as the equilibrium USD/JPY rate is partially determined by macroeconomic fundamentals (CPIs and interest rates), which are not that volatile on monthly basis. However, the USD/JPY spot rate is subject to speculation, hence is more volatile than equilibrium rate. 
+
+# References
+- Michael R. Rosenberg and William A. Barker, PhD, CFA (2019) Currency Exchange Rates: Understanding Equilibrium Value. 2020 CFA Level II Volume 1. CFA Institute.
+- DIAS, P., & MACDONALD, R. (2007). Behavioural equilibrium exchange rate estimates and implied exchange rate adjustments for ten countries. Glasgow, Univ. of Glasgow, Dep. of Economics. <http://www.gla.ac.uk/media/media_30667_en.pdf>
+- Dominick Stephens (2004) "The equilibrium exchange rate according to PPP and UIP,"Reserve Bank of New Zealand Discussion Paper Series DP 2004/03, Reserve Bank of New Zealand.<https://ideas.repec.org/p/nzb/nzbdps/2004-03.html>
